@@ -77,9 +77,8 @@ module Sidekiq
       # @return [Boolean]
       def throttled?(message) # rubocop:disable Metrics/MethodLength
         message = JSON.parse message
-        job = message.fetch("class")   { return false }
-        job = message.fetch("wrapped") { return false } if job == "ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper"
-        jid = message.fetch("jid")     { return false }
+        job = message.fetch("wrapped", message.fetch("class", false))
+        jid = message.fetch("jid", false)
 
         preload_constant! job
 
