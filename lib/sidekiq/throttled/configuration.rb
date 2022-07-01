@@ -14,6 +14,7 @@ module Sidekiq
       # @return [self]
       def reset!
         @inherit_strategies = false
+        @enhanced_queues = true
 
         self
       end
@@ -44,6 +45,20 @@ module Sidekiq
       # @return [Boolean]
       def inherit_strategies?
         @inherit_strategies
+      end
+
+      # Instructs throttler to enable pausable queues and add the enhanced
+      # queues tab to the web interface when sidekiq/throttled/web is required.
+      def enhanced_queues=(value)
+        @enhanced_queues = value ? true : false
+      end
+
+      # Wether pausable queues should be enabled
+      # Default: `true`.
+      #
+      # @return [Boolean]
+      def enhanced_queues?
+        @enhanced_queues
       end
     end
   end

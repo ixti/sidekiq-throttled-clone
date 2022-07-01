@@ -205,6 +205,31 @@ lock TTL to fit your needs:
 sidekiq_throttle(:concurrency => { :limit => 20, :ttl => 1.hour.to_i })
 ```
 
+## SuperFetch support
+
+Sidekiq Pro offers improved reliability though, amongst other, SuperFetch which
+prevents jobs from being lost when a worker crashes or is killed.
+
+This gem can make use of SuperFetch for fetching job while still applying
+throttling as configured. By default this gem picks up the configured fetcher
+from Sidekiq.
+
+However, to make full use of SuperFetch, you will want to configure it to tell
+this gem to clear throttles for jobs it recovers. You can do this by providing
+a block to `Sidekiq.super_fetch!` during setup:
+
+``` ruby
+require "sidekiq/throttled"
+
+# Enable SuperFetch & configure it to notify Throttled of recovered jobs
+Sidekiq.super_fetch! do |msg|
+  Sidekiq::Throttled.recover!(msg)
+end
+
+# Enable Thottled
+Sidekiq::Throttled.setup!
+```
+
 ## Supported Ruby Versions
 
 This library aims to support and is [tested against][ci] the following Ruby
@@ -235,6 +260,10 @@ This library aims to support work with following [Sidekiq][sidekiq] versions:
 * Sidekiq 6.4.x
 * Sidekiq 6.5.x
 
+And the following Sidekiq Pro versions:
+
+* Sidekiq Pro 5.3.x
+* Sidekiq Pro 5.5.x
 
 ## Contributing
 

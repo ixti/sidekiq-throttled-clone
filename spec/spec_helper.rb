@@ -10,6 +10,9 @@ require "sidekiq_helper"
 require "support/logging"
 require "support/timecop"
 
+# Make sidekiq(-pro) private methods public for testability
+$TESTING = true # rubocop: disable Style/GlobalVars
+
 # See http://rubydoc.info/gems/rspec-core/RSpec/Core/Configuration
 RSpec.configure do |config|
   # rspec-expectations config goes here. You can use an alternate

@@ -85,4 +85,32 @@ RSpec.describe Sidekiq::Throttled, :sidekiq => :disabled do
       described_class.throttled? message
     end
   end
+
+  describe ".recover!" do
+    it "tolerates invalid JSON message" do
+      expect(described_class.throttled?("][")).to be false
+    end
+
+    it "tolerates invalid (not fully populated) messages" do
+      expect(described_class.throttled?(%({"class" => "foo"}))).to be false
+    end
+
+    it "tolerates if limiter not registered" do
+      message = %({"class":"foo","jid":#{jid.inspect}})
+      expect(described_class.throttled?(message)).to be false
+    end
+
+    it "passes JID to registered strategy" do
+      strategy = Sidekiq::Throttled::Registry.add("foo",
+        :threshold   => { :limit => 1, :period => 1 },
+        :concurrency => { :limit => 1 })
+
+      payload_jid = jid
+      message     = %({"class":"foo","jid":#{payload_jid.inspect}})
+
+      expect(strategy).to receive(:finalize!).with payload_jid
+
+      described_class.recover! message
+    end
+  end
 end
