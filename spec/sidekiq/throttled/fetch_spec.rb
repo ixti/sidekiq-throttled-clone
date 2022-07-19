@@ -3,26 +3,56 @@
 require "sidekiq/api"
 require "sidekiq/throttled/fetch"
 
+begin
+  require "sidekiq-pro"
+  require "sidekiq/pro/super_fetch"
+rescue LoadError
+  true
+end
+
 require "support/working_class_hero"
 
 RSpec.describe Sidekiq::Throttled::Fetch, :sidekiq => :disabled do
-  subject(:fetcher) { described_class.new options }
+  subject(:fetcher) { described_class.new sidekiq_options }
 
   let(:options)       { { :queues => queues } }
   let(:queues)        { %w[heroes dreamers] }
 
+  def sidekiq_options(**opts)
+    sidekiq_options = Sidekiq.options = Sidekiq::DEFAULTS.merge(options.merge(opts))
+
+    # Sidekiq 6.5 expects Sidekiq as a config object
+    # https://github.com/mperham/sidekiq/commit/67daa7a408b214d593100f782271ed108686c147
+    sidekiq_options = Sidekiq unless Gem::Version.new(Sidekiq::VERSION) < Gem::Version.new("6.5.0")
+
+    # Set fetcher if not passed explicitly
+    sidekiq_options[:fetcher] = sidekiq_options.fetch(:fetcher, Sidekiq::BasicFetch.new(sidekiq_options))
+    sidekiq_options
+  end
+
   describe ".new" do
-    it "fails if :queues are missing" do
-      expect { described_class.new({}) }.to raise_error(KeyError, %r{:queues})
+    it "fails if :fetcher is missing" do
+      opts = sidekiq_options
+      if Gem::Version.new(Sidekiq::VERSION) < Gem::Version.new("6.5.0")
+        opts.delete(:fetcher)
+      else
+        opts.options.delete(:fetcher)
+      end
+      expect { described_class.new opts }.to raise_error(KeyError, %r{:fetcher})
+    end
+
+    it "fails if :fetcher is nil" do
+      options[:fetcher] = nil
+      expect { fetcher }.to raise_error(ArgumentError, %r{:fetcher})
     end
 
     it "fails if :queues are empty" do
-      expect { described_class.new(:queues => []) }
-        .to raise_error(ArgumentError, %r{:queues})
+      options[:queues] = []
+      expect { fetcher }.to raise_error(ArgumentError, %r{:queues})
     end
 
-    it "is non-strict by default" do
-      fetcher = described_class.new(:queues => queues)
+    it "is not strict by default" do
+      options[:strict] = nil
       expect(fetcher.instance_variable_get(:@strict)).to be_falsy
     end
 
@@ -31,8 +61,7 @@ RSpec.describe Sidekiq::Throttled::Fetch, :sidekiq => :disabled do
         .to receive(:new)
         .with(described_class::TIMEOUT)
         .and_call_original
-
-      described_class.new(:queues => queues)
+      fetcher
     end
 
     it "allows override throttled queues cooldown period" do
@@ -41,7 +70,8 @@ RSpec.describe Sidekiq::Throttled::Fetch, :sidekiq => :disabled do
         .with(1312)
         .and_call_original
 
-      described_class.new(:queues => queues, :throttled_queue_cooldown => 1312)
+      options[:throttled_queue_cooldown] = 1312
+      fetcher
     end
   end
 
@@ -66,8 +96,8 @@ RSpec.describe Sidekiq::Throttled::Fetch, :sidekiq => :disabled do
 
   describe "#retrieve_work" do
     it "sleeps instead of BRPOP when queues list is empty" do
-      expect(fetcher).to receive(:filter_queues).and_return([])
-      expect(fetcher).to receive(:sleep).with(described_class::TIMEOUT)
+      fetcher.instance_variable_set(:@throttled_queues, %w[queue:heroes queue:dreamers])
+      expect(fetcher.fetcher).to receive(:sleep).with(described_class::TIMEOUT)
 
       Sidekiq.redis do |redis|
         expect(redis).not_to receive(:brpop)
@@ -172,6 +202,74 @@ RSpec.describe Sidekiq::Throttled::Fetch, :sidekiq => :disabled do
       end
 
       include_examples "expected behavior"
+    end
+  end
+
+  if Sidekiq.pro?
+    context "with SuperFetch" do
+      subject(:fetcher) { described_class.new sidekiq_options(:fetcher => super_fetch) }
+
+      let(:super_fetch) { Sidekiq::Pro::SuperFetch.new(sidekiq_options).tap(&:startup) }
+      let(:queues) { %w[heroes] }
+      let(:queue) { Sidekiq::Queue.new("heroes") }
+
+      before do
+        Sidekiq::Throttled.configuration.enhanced_queues = false
+        Sidekiq::Client.push_bulk({
+          "class" => WorkingClassHero,
+          "args"  => Array.new(3) { [1, 2, 3] }
+        })
+      end
+
+      describe ".new" do
+        it "uses SuperFetcher" do
+          expect(fetcher.fetcher).to eq(super_fetch)
+        end
+      end
+
+      describe "#bulk_requeue" do
+        it "requeues using rpoplpush" do
+          works = Array.new(3) { fetcher.retrieve_work }
+          expect(queue.size).to eq(0)
+
+          Sidekiq.redis do |conn|
+            expect(conn)
+              .to receive(:rpoplpush).with(%r{queue:sq|.*|heroes}, "queue:heroes")
+              .exactly(4).times
+              .and_call_original
+          end
+
+          fetcher.bulk_requeue(works, sidekiq_options)
+
+          expect(queue.size).to eq(3)
+        end
+      end
+
+      describe "#retrieve_work" do
+        it "retrieves work using brpoplpush" do
+          Sidekiq.redis do |conn|
+            expect(conn)
+              .to receive(:brpoplpush).with("queue:heroes", %r{queue:sq|.*|heroes}, 1)
+              .and_call_original
+          end
+          fetcher.retrieve_work
+        end
+
+        it "requeues using the super_requeue script" do
+          Sidekiq::Pro::Scripting.bootstrap
+          script_sha = Sidekiq::Pro::Scripting::SHAS[:super_requeue]
+          Sidekiq.redis do |conn|
+            allow(Sidekiq::Throttled).to receive(:throttled?).and_return(true)
+            expect(conn)
+              .to receive(:evalsha)
+              .with(script_sha, anything, anything)
+              .once
+              .and_call_original
+          end
+
+          fetcher.retrieve_work
+        end
+      end
     end
   end
 end

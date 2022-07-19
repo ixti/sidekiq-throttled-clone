@@ -22,6 +22,7 @@ module Sidekiq
         # @api private
         def registered(app)
           register_throttled_tab app
+          Sidekiq::Web.tabs["Throttled"] = "throttled"
         end
 
         private
@@ -40,4 +41,3 @@ module Sidekiq
 end
 
 Sidekiq::Web.register Sidekiq::Throttled::Web
-Sidekiq::Web.tabs["Throttled"] = "throttled"
