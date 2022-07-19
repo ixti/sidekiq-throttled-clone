@@ -1,6 +1,12 @@
 # frozen_string_literal: true
 
 require "json"
+begin
+  require "sidekiq-pro"
+  require "sidekiq/pro/super_fetch"
+rescue LoadError
+  true
+end
 
 RSpec.describe Sidekiq::Throttled, :sidekiq => :disabled do
   describe ".setup!" do
@@ -11,6 +17,7 @@ RSpec.describe Sidekiq::Throttled, :sidekiq => :disabled do
 
       require "sidekiq/processor"
       allow(Sidekiq).to receive(:server?).and_return true
+
       described_class.setup!
     end
 
@@ -21,6 +28,26 @@ RSpec.describe Sidekiq::Throttled, :sidekiq => :disabled do
     it "injects Sidekiq::Throttled::Middleware server middleware" do
       expect(Sidekiq.server_middleware.exists?(Sidekiq::Throttled::Middleware))
         .to be true
+    end
+
+    if Sidekiq.pro?
+      context "with Sidekiq::Pro" do
+        before do
+          # Enable super_fetch if available; setup a weird call to expect for testing
+          Sidekiq.super_fetch! do
+            Kernel.exit
+          end
+
+          described_class.setup!
+        end
+
+        it "sets up orphan handling" do
+          expect(described_class).to receive(:recover!).with("foo")
+          expect(Kernel).to receive(:exit)
+
+          Sidekiq.options[:fetcher].notify_orphan("foo")
+        end
+      end
     end
   end
 

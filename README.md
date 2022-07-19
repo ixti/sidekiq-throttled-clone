@@ -210,25 +210,10 @@ sidekiq_throttle(:concurrency => { :limit => 20, :ttl => 1.hour.to_i })
 Sidekiq Pro offers improved reliability though, amongst other, SuperFetch which
 prevents jobs from being lost when a worker crashes or is killed.
 
-This gem can make use of SuperFetch for fetching job while still applying
+This gem makes use of SuperFetch for fetching job while still applying
 throttling as configured. By default this gem picks up the configured fetcher
-from Sidekiq.
-
-However, to make full use of SuperFetch, you will want to configure it to tell
-this gem to clear throttles for jobs it recovers. You can do this by providing
-a block to `Sidekiq.super_fetch!` during setup:
-
-``` ruby
-require "sidekiq/throttled"
-
-# Enable SuperFetch & configure it to notify Throttled of recovered jobs
-Sidekiq.super_fetch! do |msg|
-  Sidekiq::Throttled.recover!(msg)
-end
-
-# Enable Thottled
-Sidekiq::Throttled.setup!
-```
+from Sidekiq. Make sure to call `Sidekiq.super_fetch!` _before_
+`Sidekiq::Throttled.setup!`.
 
 ## Supported Ruby Versions
 
