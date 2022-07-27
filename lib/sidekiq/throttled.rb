@@ -94,8 +94,10 @@ module Sidekiq
       # @return [Void]
       def recover!(message)
         with_strategy_and_job(message) do |strategy, jid, args|
-          strategy.finalize! jid, *args
+          strategy.finalize!(jid, *args)
         end
+      rescue
+        false
       end
 
       private
