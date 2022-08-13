@@ -27,7 +27,7 @@ module Sidekiq
           end
 
           def queues_cmd
-            super - @paused.to_a
+            super - @paused.map { |q| QueueName.expand(q) }
           end
         end
 

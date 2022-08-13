@@ -23,34 +23,26 @@ module Sidekiq
       # @option options [Integer] :throttled_queue_cooldown (TIMEOUT)
       #   Min delay in seconds before queue will be polled again after
       #   throttled job.
-      # @option options [Boolean] :strict (false)
-      # @option options [Array<#to_s>] :queue
       # @option options [Fetch] :fetcher
       def initialize(options)
         @throttled_queues = ExpirableList.new(options.fetch(:throttled_queue_cooldown, TIMEOUT))
-
         @fetcher = options.fetch(:fetcher)
-        @strict = options.fetch(:strict, false)
-        @queues = options.fetch(:queues).map { |q| QueueName.expand q }
 
-        raise ArgumentError, "empty :queues" if @queues.empty?
         raise ArgumentError, ":fetcher not set" if @fetcher.nil?
-
-        @queues.uniq! if @strict
       end
 
       # Retrieves job from original fetcher.
       #
       # @return [Sidekiq::*::UnitOfWork, nil]
       def retrieve_work
-        work = without_queues(@throttled_queues) do
+        work = without_queues(@throttled_queues.to_a) do
           fetcher.retrieve_work
         end
 
         return work unless work && Throttled.throttled?(work.job)
 
         work.respond_to?(:requeue_throttled) ? work.requeue_throttled : work.requeue
-        @throttled_queues << QueueName.expand(work.queue_name)
+        @throttled_queues << work.queue_name
 
         nil
       end
@@ -69,7 +61,7 @@ module Sidekiq
       # Compatible with BasicFetch & SuperFetch
       #
       # @param [Array<String>] queues
-      #   The queues that should be active for this block
+      #   The queues that should be inactive for this block
       def without_queues(queues, &_block)
         queues.each { |q| fetcher.notify(:pause, q) }
         yield

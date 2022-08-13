@@ -46,16 +46,6 @@ RSpec.describe Sidekiq::Throttled::Fetch, :sidekiq => :disabled do
       expect { fetcher }.to raise_error(ArgumentError, %r{:fetcher})
     end
 
-    it "fails if :queues are empty" do
-      options[:queues] = []
-      expect { fetcher }.to raise_error(ArgumentError, %r{:queues})
-    end
-
-    it "is not strict by default" do
-      options[:strict] = nil
-      expect(fetcher.instance_variable_get(:@strict)).to be_falsy
-    end
-
     it "cooldowns queues with TIMEOUT by default" do
       expect(Sidekiq::Throttled::ExpirableList)
         .to receive(:new)
@@ -96,7 +86,7 @@ RSpec.describe Sidekiq::Throttled::Fetch, :sidekiq => :disabled do
 
   describe "#retrieve_work" do
     it "sleeps instead of BRPOP when queues list is empty" do
-      fetcher.instance_variable_set(:@throttled_queues, %w[queue:heroes queue:dreamers])
+      fetcher.instance_variable_set(:@throttled_queues, %w[heroes dreamers])
       expect(fetcher.fetcher).to receive(:sleep).with(described_class::TIMEOUT)
 
       Sidekiq.redis do |redis|
@@ -113,13 +103,25 @@ RSpec.describe Sidekiq::Throttled::Fetch, :sidekiq => :disabled do
         })
       end
 
-      it "pauses job's queue for TIMEOUT seconds" do
+      it "pauses job's queue for TIMEOUT seconds" do # rubocop:disable Rspec/MultipleExpectations
         Sidekiq.redis do |redis|
+          options[:throttled_queue_cooldown] = 0.1
           expect(Sidekiq::Throttled).to receive(:throttled?).and_return(true)
           expect(fetcher.retrieve_work).to be_nil
 
           expect(redis).to receive(:brpop)
             .with("queue:dreamers", 2)
+
+          # Checks for race condition where the TIMEOUT passed and the queue is re-enabled
+          # before it can be reactivated on the original fetcher
+          allow(fetcher.fetcher).to receive(:retrieve_work).and_wrap_original do |m|
+            sleep 0.1
+            m.call
+          end
+          expect(fetcher.retrieve_work).to be_nil
+
+          expect(redis).to receive(:brpop)
+            .with("queue:heroes", "queue:dreamers", 2)
 
           expect(fetcher.retrieve_work).to be_nil
         end
