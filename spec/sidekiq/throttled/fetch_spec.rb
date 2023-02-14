@@ -149,6 +149,15 @@ RSpec.describe Sidekiq::Throttled::Fetch, :sidekiq => :disabled do
             fetcher.retrieve_work
           end
         end
+
+        context "when using different queue for throttled jobs" do
+          it "pushes fetched job back to the right queue" do
+            Sidekiq.redis do |conn|
+              expect(conn).to receive(:lpush).with("queue:heroes_throttled", an_instance_of(String))
+              fetcher.retrieve_work
+            end
+          end
+        end
       end
     end
 

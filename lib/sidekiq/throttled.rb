@@ -86,6 +86,10 @@ module Sidekiq
         false
       end
 
+      def requeue_throttled_queue_name(message, queue)
+        message.fetch("wrapped") { message.fetch("throttled_queue") { return queue } }
+      end
+
       private
 
       # @return [void]

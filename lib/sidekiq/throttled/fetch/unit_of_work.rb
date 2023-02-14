@@ -42,6 +42,10 @@ module Sidekiq
           @queue_name ||= QueueName.normalize queue
         end
 
+        def requeue_throttled_queue_name
+          QueueName.normalize Throttled.requeue_throttled_queue_name(job, queue_name)
+        end
+
         # Pushes job back to the tail of the queue, so that it will be popped
         # first next time fetcher will pull job.
         #
@@ -67,7 +71,7 @@ module Sidekiq
         #
         # @return [void]
         def requeue_throttled
-          Sidekiq.redis { |conn| conn.lpush(QueueName.expand(queue_name), job) }
+          Sidekiq.redis { |conn| conn.lpush(QueueName.expand(requeue_throttled_queue_name), job) }
         end
 
         # Tells whenever job should be pushed back to queue (throttled) or not.
